@@ -8,8 +8,10 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates iproute2
 COPY --from=build /out/server /usr/local/bin/server
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/server"]
+ENTRYPOINT ["/entrypoint.sh"]
