@@ -56,11 +56,19 @@ func solveFlareSolverr(ctx context.Context, flareSolverrURL, targetURL, postData
 		cmd = "request.post"
 	}
 
+	// 120s, not FlareSolverr's own 60s default: on a CPU-constrained host
+	// (observed: a 2-vCPU box running several other stacks, load average
+	// above 2 at the time) solving Cloudflare's challenge is CPU-bound and
+	// can simply take longer under contention - confirmed directly, a
+	// solve that would otherwise succeed hit "Timeout after 60.0 seconds"
+	// with Chrome alone using 135% CPU. This doesn't fix the underlying
+	// resource pressure, just gives a slow-but-working solve more room
+	// before giving up.
 	body, err := json.Marshal(flareSolverrRequest{
 		Cmd:        cmd,
 		URL:        targetURL,
 		PostData:   postData,
-		MaxTimeout: 60000,
+		MaxTimeout: 120000,
 	})
 	if err != nil {
 		return nil, err
@@ -75,7 +83,7 @@ func solveFlareSolverr(ctx context.Context, flareSolverrURL, targetURL, postData
 	// FlareSolverr's own maxTimeout above bounds how long it spends solving
 	// the challenge; this client timeout just needs enough headroom on top
 	// of that for the HTTP round trip itself.
-	httpClient := &http.Client{Timeout: 90 * time.Second}
+	httpClient := &http.Client{Timeout: 150 * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("flaresolverr: request: %w", err)
