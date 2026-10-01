@@ -125,10 +125,11 @@ services:
     profiles: ["remote-lan-bridge"]
     restart: unless-stopped
     mem_limit: 128m
-    # The CIFS mount needs more than normal container capabilities.
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
+    # mount.cifs does its own capset()/prctl() as part of mounting - tried
+    # cap_add: [SYS_ADMIN, NET_ADMIN] instead of this, confirmed directly
+    # it's not enough ("Unable to set current process capabilities:
+    # Operation not permitted", mount then fails with Permission denied).
+    privileged: true
     environment:
       SMB_HOST: ${SMB_HOST:-192.168.1.1}
       SMB_SHARE: ${SMB_SHARE:-downloads}
