@@ -130,6 +130,11 @@ services:
       SMB_SHARE: ${SMB_SHARE:-downloads}
       SMB_USER: ${SMB_USER}
       SMB_PASSWORD: ${SMB_PASSWORD}
+      # Route to SMB_HOST via the gateway container on this docker network
+      # (e.g. wgdashboard) - same values nginx-balancer's nginx uses for
+      # the same reason, see its docker-entrypoint-reload.sh.
+      LAN_CIDR: ${LAN_CIDR:-192.168.1.0/24}
+      LAN_GATEWAY_IP: ${LAN_GATEWAY_IP:-10.100.0.2}
     networks:
       - homelab-private-network
     ports:
