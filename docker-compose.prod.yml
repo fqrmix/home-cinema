@@ -11,7 +11,7 @@
 # conflict with nginx-balancer's own 80/443 and bypass its TLS/host-based
 # routing entirely. Instead both join homelab-private-network (owned and
 # created by nginx-balancer's compose project, referenced here as
-# external — same network smb-nfs-bridge already uses) so nginx-balancer
+# external — same network smb-relay already uses) so nginx-balancer
 # can reach them by container name. See nginx-balancer's
 # nginx/conf.d/50-home-cinema.conf.
 services:

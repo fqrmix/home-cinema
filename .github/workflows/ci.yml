@@ -47,10 +47,10 @@ jobs:
           # actually connects to it.
           docker run --rm --add-host=backend:127.0.0.1 home-cinema-nginx-ci nginx -t
 
-      - name: Validate smb-nfs-bridge Dockerfile and entrypoint
+      - name: Validate smb-relay Dockerfile and entrypoint
         run: |
-          docker build --platform linux/amd64 -t home-cinema-smb-nfs-bridge-ci ./smb-nfs-bridge
-          sh -n smb-nfs-bridge/entrypoint.sh
+          docker build -t home-cinema-smb-relay-ci ./smb-relay
+          sh -n smb-relay/entrypoint.sh
 
   build-and-push:
     needs: validate

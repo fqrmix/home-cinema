@@ -107,24 +107,28 @@ services:
   # Opt-in (profile "remote-lan-bridge"): only needed when this host has no
   # direct route to the router's LAN and the only thing that does is a
   # docker network (e.g. a WireGuard sidecar on homelab-private-network).
-  # Mounts the SMB share using that network's access, then re-exports it as
-  # NFSv4 on 127.0.0.1:2049 — Docker always lets the host reach containers
-  # on its own bridge networks, so the host can mount that loopback NFS
-  # export the same way README's default setup mounts CIFS directly, and
-  # everything downstream (HOST_DOWNLOADS_PATH, the bind mounts above) is
-  # unchanged. See README "Если хост не видит роутер напрямую".
+  # Mounts the SMB share using that network's access, then re-shares it as
+  # SMB again (via Samba) on 127.0.0.1:445 — Docker always lets the host
+  # reach containers on its own bridge networks, so the host can mount
+  # that loopback share the same way README's default setup mounts CIFS
+  # directly from the router, and everything downstream
+  # (HOST_DOWNLOADS_PATH, the bind mounts above) is unchanged. See README
+  # "Если хост не видит роутер напрямую".
   #
-  # amd64 only (base image itsthenetwork/nfs-server-alpine has no arm64
-  # build) — on an arm64 host this runs under qemu emulation or not at all.
-  smb-nfs-bridge:
-    build: ./smb-nfs-bridge
+  # Samba, not NFS: confirmed directly against a real router share that
+  # the kernel NFS server can't export a CIFS mount at all ("does not
+  # support NFS export" - CIFS doesn't implement the export_operations
+  # nfsd needs). Samba is a userspace file server, so it re-shares a CIFS
+  # mount fine.
+  smb-relay:
+    build: ./smb-relay
     profiles: ["remote-lan-bridge"]
     restart: unless-stopped
     mem_limit: 128m
-    # Both the CIFS mount and the in-container NFS kernel server need more
-    # than normal container capabilities; this combination is what the base
-    # image's own docs call for.
-    privileged: true
+    # The CIFS mount needs more than normal container capabilities.
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
     environment:
       SMB_HOST: ${SMB_HOST:-192.168.1.1}
       SMB_SHARE: ${SMB_SHARE:-downloads}
@@ -138,7 +142,7 @@ services:
     networks:
       - homelab-private-network
     ports:
-      - "127.0.0.1:2049:2049"
+      - "127.0.0.1:445:445"
 
 networks:
   homelab-private-network:

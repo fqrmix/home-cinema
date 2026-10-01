@@ -47,24 +47,24 @@ sudo mount /mnt/downloads
 
 На некоторых серверах доступ в домашнюю сеть (`192.168.1.1`) есть только у определённой docker-сети (например, через VPN-сайдкар типа WireGuard), а у самого хоста — нет. В этом случае шаг 2 выше напрямую не сработает (`mount -t cifs` с хоста упадёт — нет маршрута).
 
-Решение — сервис `smb-nfs-bridge` (профиль `remote-lan-bridge`, выключен по умолчанию): контейнер в той же docker-сети, что и VPN, сам монтирует CIFS (доступ есть у его сети) и тут же отдаёт это наружу как NFSv4 на `127.0.0.1:2049`. Хост всегда может достучаться до контейнеров на своих docker-сетях — поэтому дальше хост монтирует NFS с localhost вместо CIFS с роутера, и весь остальной flow (`HOST_DOWNLOADS_PATH`, bind-mount в backend/jellyfin) не меняется.
+Решение — сервис `smb-relay` (профиль `remote-lan-bridge`, выключен по умолчанию): контейнер в той же docker-сети, что и VPN (туда ему также нужен явный маршрут до LAN через шлюз-контейнер, `LAN_CIDR`/`LAN_GATEWAY_IP` в `.env` — тот же манёвр, что уже сделан в `nginx-balancer`, см. его `docker-entrypoint-reload.sh`), сам монтирует CIFS и тут же отдаёт это наружу **снова как SMB** (через Samba) на `127.0.0.1:445`. Хост всегда может достучаться до контейнеров на своих docker-сетях — поэтому дальше хост монтирует CIFS с localhost вместо CIFS с роутера напрямую, и весь остальной flow (`HOST_DOWNLOADS_PATH`, bind-mount в backend/jellyfin) не меняется.
+
+(Изначально здесь был NFS-реэкспорт — не сработало: ядерный NFS-сервер в принципе не умеет экспортировать CIFS-примонтированную файловую систему, `exportfs: does not support NFS export`. Проверено на реальной шаре. Samba — userspace-сервер, с CIFS-примонтированной директорией работает нормально.)
 
 ```sh
-# в .env: SMB_HOST, SMB_SHARE, SMB_USER, SMB_PASSWORD
-# networks.homelab-private-network в docker-compose.yml — это реальное имя
-# docker-сети, где у VPN-контейнера есть доступ в домашнюю сеть; подставьте своё
+# в .env: SMB_HOST, SMB_SHARE, SMB_USER, SMB_PASSWORD, LAN_CIDR, LAN_GATEWAY_IP
+# LAN_GATEWAY_IP — адрес VPN/шлюз-контейнера в networks.homelab-private-network
+# (в docker-compose.yml nginx-balancer — это wgdashboard); подставьте своё
 
-docker compose --profile remote-lan-bridge up -d smb-nfs-bridge
+docker compose --profile remote-lan-bridge up -d --build smb-relay
 ```
 
-`/etc/fstab` на хосте — вместо CIFS-строки из шага 2:
+`/etc/fstab` на хосте — та же CIFS-строка из шага 2, только на localhost и с гостевым доступом вместо логина на роутере:
 ```
-127.0.0.1:/ /mnt/downloads nfs4 _netdev,x-systemd.automount,x-systemd.mount-timeout=30 0 0
+//127.0.0.1/relay /mnt/downloads cifs guest,vers=3.0,iocharset=utf8,uid=1000,gid=1000,ro,_netdev,x-systemd.automount,x-systemd.mount-timeout=30 0 0
 ```
 
-(смонтировать можно, только когда `smb-nfs-bridge` уже поднят и прошёл CIFS-логин — проверить `docker compose logs smb-nfs-bridge`).
-
-Известный риск: образ `itsthenetwork/nfs-server-alpine`, на котором собран `smb-nfs-bridge`, собирается только под `linux/amd64` — на arm64-хосте это пойдёт через эмуляцию (собирается и работает, но медленнее) либо не соберётся вовсе, если `qemu-user-static`/binfmt для amd64 не настроен.
+(смонтировать можно, только когда `smb-relay` уже поднят и прошёл CIFS-логин к роутеру — проверить `docker compose logs smb-relay`).
 
 ## Запуск
 
