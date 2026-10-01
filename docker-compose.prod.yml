@@ -1,0 +1,30 @@
+# Apply on top of docker-compose.yml only on the shared host behind
+# nginx-balancer (../nginx-balancer) — NOT for local testing, where the
+# base file's direct host ports (80, 8096) are what README's local-test
+# instructions rely on.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# nginx-balancer is the single public entry point (TLS + routing by
+# domain) for every stack on that host; this repo's own `nginx` and
+# `jellyfin` must not also bind host ports 80/8096 directly, or they
+# conflict with nginx-balancer's own 80/443 and bypass its TLS/host-based
+# routing entirely. Instead both join homelab-private-network (owned and
+# created by nginx-balancer's compose project, referenced here as
+# external — same network smb-nfs-bridge already uses) so nginx-balancer
+# can reach them by container name. See nginx-balancer's
+# nginx/conf.d/50-home-cinema.conf.
+services:
+  nginx:
+    container_name: home_cinema_nginx
+    ports: !override []
+    networks:
+      default: {}
+      homelab-private-network: {}
+
+  jellyfin:
+    container_name: home_cinema_jellyfin
+    ports: !override []
+    networks:
+      default: {}
+      homelab-private-network: {}
