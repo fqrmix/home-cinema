@@ -76,6 +76,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+На сервере вместо `--build` можно `docker compose pull && docker compose up -d` — CI (`.github/workflows/ci.yml`) собирает и пушит `backend`/`nginx` в `ghcr.io/fqrmix/home-cinema-{backend,nginx}:latest` при каждом мерже в `main`. Если пакеты приватные — на сервере заранее `docker login ghcr.io`.
+
 ### Продакшен за nginx-balancer
 
 На общем хосте, где единая точка входа (TLS + роутинг по доменам) —

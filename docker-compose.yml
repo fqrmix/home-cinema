@@ -18,7 +18,13 @@ services:
       retries: 10
 
   backend:
+    # `docker compose up --build` still builds locally. On the server,
+    # `docker compose pull && docker compose up -d` uses the image CI
+    # pushes on every merge to main instead - see .github/workflows/ci.yml.
+    # Requires `docker login ghcr.io` on the server first if the
+    # ghcr.io/fqrmix/home-cinema-backend package is private.
     build: ./backend
+    image: ghcr.io/fqrmix/home-cinema-backend:latest
     restart: unless-stopped
     mem_limit: 128m
     depends_on:
@@ -72,9 +78,11 @@ services:
       LOG_LEVEL: info
 
   nginx:
+    # Same build-locally-or-pull-from-CI story as backend above.
     build:
       context: .
       dockerfile: nginx/Dockerfile
+    image: ghcr.io/fqrmix/home-cinema-nginx:latest
     restart: unless-stopped
     mem_limit: 32m
     depends_on:
