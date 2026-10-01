@@ -1,0 +1,136 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command: >
+      postgres -c shared_buffers=64MB -c max_connections=20 -c work_mem=4MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    mem_limit: 128m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      flaresolverr:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      HTTP_PORT: 8080
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TOKEN_TTL: ${JWT_TOKEN_TTL:-720h}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      JELLYFIN_URL: http://jellyfin:8096
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
+      TRANSMISSION_URL: ${TRANSMISSION_URL:-http://192.168.1.1:9091/transmission/rpc}
+      TRANSMISSION_USER: ${TRANSMISSION_USER}
+      TRANSMISSION_PASSWORD: ${TRANSMISSION_PASSWORD}
+      RUTRACKER_LOGIN: ${RUTRACKER_LOGIN}
+      RUTRACKER_PASSWORD: ${RUTRACKER_PASSWORD}
+      FLARESOLVERR_URL: http://flaresolverr:8191/v1
+      SMB_MOUNT_PATH: /mnt/downloads
+      SYNC_INTERVAL: 15s
+    volumes:
+      # Read-only: backend only verifies files exist before triggering a
+      # Jellyfin scan, it never writes here. Transmission (on the router)
+      # writes to this share directly, over the network, not via this mount.
+      # HOST_DOWNLOADS_PATH must be an *existing* host path: on the real
+      # deploy server this is the SMB mount from the router (see README);
+      # for local testing it defaults to ./data/downloads in this repo.
+      - ${HOST_DOWNLOADS_PATH:-./data/downloads}:/mnt/downloads:ro
+
+  # Drives a real headless browser to clear rutracker.org's Cloudflare
+  # managed challenge, which blocks every plain HTTP client (confirmed
+  # directly against curl and Go's net/http, with and without a proxy, on
+  # every rutracker.org/.net page including the login form). RutrackerClient
+  # only calls this on login — Search and DownloadTorrent reuse the
+  # resulting cookies via plain HTTP, so this isn't on rutracker's hot path.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    # Observed Chrome peaking at ~292MB while solving rutracker's challenge
+    # (not just launching) — a 300m limit OOM-kills the render process mid-
+    # solve, which FlareSolverr reports as "tab crashed". 600m leaves headroom.
+    mem_limit: 600m
+    # Docker's default /dev/shm is 64MB, too small for Chrome's rendering —
+    # also observed causing "tab crashed".
+    shm_size: "512m"
+    environment:
+      LOG_LEVEL: info
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    mem_limit: 32m
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+  jellyfin:
+    image: linuxserver/jellyfin
+    restart: unless-stopped
+    mem_limit: 700m
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Europe/Moscow
+    volumes:
+      - jellyfin-config:/config
+      - ${HOST_DOWNLOADS_PATH:-./data/downloads}:/media:ro
+    ports:
+      - "8096:8096"
+
+  # Opt-in (profile "remote-lan-bridge"): only needed when this host has no
+  # direct route to the router's LAN and the only thing that does is a
+  # docker network (e.g. a WireGuard sidecar on homelab-private-network).
+  # Mounts the SMB share using that network's access, then re-exports it as
+  # NFSv4 on 127.0.0.1:2049 — Docker always lets the host reach containers
+  # on its own bridge networks, so the host can mount that loopback NFS
+  # export the same way README's default setup mounts CIFS directly, and
+  # everything downstream (HOST_DOWNLOADS_PATH, the bind mounts above) is
+  # unchanged. See README "Если хост не видит роутер напрямую".
+  #
+  # amd64 only (base image itsthenetwork/nfs-server-alpine has no arm64
+  # build) — on an arm64 host this runs under qemu emulation or not at all.
+  smb-nfs-bridge:
+    build: ./smb-nfs-bridge
+    profiles: ["remote-lan-bridge"]
+    restart: unless-stopped
+    mem_limit: 128m
+    # Both the CIFS mount and the in-container NFS kernel server need more
+    # than normal container capabilities; this combination is what the base
+    # image's own docs call for.
+    privileged: true
+    environment:
+      SMB_HOST: ${SMB_HOST:-192.168.1.1}
+      SMB_SHARE: ${SMB_SHARE:-downloads}
+      SMB_USER: ${SMB_USER}
+      SMB_PASSWORD: ${SMB_PASSWORD}
+    networks:
+      - homelab-private-network
+    ports:
+      - "127.0.0.1:2049:2049"
+
+networks:
+  homelab-private-network:
+    external: true
+
+volumes:
+  pgdata:
+  jellyfin-config:
